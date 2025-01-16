@@ -1,8 +1,10 @@
+import time
+
 import usb
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, TextBox
 
 import seabreeze
 from seabreeze.spectrometers import Spectrometer
@@ -15,10 +17,10 @@ class Spectrometer:
     def __init__(self):
         self.spec = seabreeze.spectrometers.Spectrometer.from_first_available()
         # print(self.spec.features)
-        self.integration_time = 10  # ms
+        self.integration_time = 200  # ms
         self.spec.integration_time_micros(self.integration_time * 1000)
         self.wavelengths = self.spec.wavelengths()
-        self.dark_spectrum = self.acquire_dark_spectrum(int_time=10000, plot=False)
+        self.dark_spectrum = self.acquire_dark_spectrum(int_time=60000, plot=False)
 
     def plot_single_spectum(self, intensities):
         fig = plt.figure()
@@ -66,12 +68,22 @@ class Spectrometer:
             self.plot_single_spectum(dark_spectrum)
         return dark_spectrum
 
-    def get_spectrum(self, int_time=500):
+    def get_spectrum(self, int_time=200):
         spectrum = np.zeros(len(self.wavelengths))
         iterations = int(int_time / (self.integration_time))
-        for _ in range(iterations):
+        print()
+        print('Iterations is: {}'.format(iterations))
+        for i in range(iterations):
             intensities = self._get_single_spectrum()
             spectrum += intensities
+            print(
+                i,
+                spectrum[100],
+                spectrum[200],
+                spectrum[300],
+                spectrum[400],
+                spectrum[500],
+            )
         spectrum = spectrum / iterations
         spectrum = spectrum - self.dark_spectrum
         return spectrum
@@ -81,8 +93,10 @@ class SpectrumPlotter:
     def __init__(self):
         self.spectrometer = Spectrometer()
         self.intensities = self.spectrometer.get_spectrum()
+        self.integration_time = 1
         self.running = True
-        self.ylim = [0, 1000]
+        self.paused = False
+        self.ylim = [-30, 1000]
 
     def quit(self, event):
         self.running = False
@@ -91,6 +105,14 @@ class SpectrumPlotter:
         y_max = max(self.intensities)
         print('Set autoscale: {}'.format(y_max))
         self.ylim[1] = y_max * 1.2
+
+    def acquire(self, event):
+        print('Acqure spectrum for {}s'.format(self.integration_time))
+        self.paused = True
+        time.sleep(0.2)
+
+        intensities = self.spectrometer.get_spectrum(self.integration_time * 1000)
+        print('Done')
 
     def save_data(self, event):
         xy_data = np.vstack(
@@ -111,6 +133,16 @@ class SpectrumPlotter:
             # Scale is log
             self.ylim = [0, self.ylim[1]]
             self.axis.set_yscale('linear')
+
+    def set_integration_time(self, value):
+        try:
+            self.integration_time = float(value)
+        except ValueError:
+            print('Cannot read value!!!!!')
+            self.integration_time = 0.1
+
+    def restart(self, event):
+        self.paused = False
 
     def _create_axis(self):
         plt.ion()
@@ -138,12 +170,27 @@ class SpectrumPlotter:
         b_logscale = Button(b_logscale_ax, 'Log')
         b_logscale.on_clicked(self.logscale)
 
-        b_savedata_ax = plt.axes([0.4, 0.9, 0.05, 0.05])
+        b_acquire_ax = plt.axes([0.4, 0.9, 0.05, 0.05])
+        b_acquire = Button(b_acquire_ax, 'Acquire')
+        b_acquire.on_clicked(self.acquire)
+
+        b_savedata_ax = plt.axes([0.5, 0.9, 0.05, 0.05])
         b_savedata = Button(b_savedata_ax, 'Save data')
         b_savedata.on_clicked(self.save_data)
 
+        b_restart_ax = plt.axes([0.6, 0.9, 0.05, 0.05])
+        b_restart = Button(b_restart_ax, 'Restart')
+        b_restart.on_clicked(self.restart)
+
+        b_int_time_ax = plt.axes([0.9, 0.9, 0.05, 0.05])
+        text_box = TextBox(b_int_time_ax, 'Integration time', initial='1')
+        text_box.on_submit(self.set_integration_time)
+
         while self.running:
-            self.intensities = self.spectrometer.get_spectrum()
+            if not self.paused:
+                self.intensities = self.spectrometer.get_spectrum()
+            else:
+                time.sleep(0.1)
             self.graph.set_ydata(self.intensities)
             self.axis.set_ylim(self.ylim[0], self.ylim[1])
             self.fig.canvas.draw()
